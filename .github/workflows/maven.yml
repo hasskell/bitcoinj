@@ -1,0 +1,49 @@
+name: Java CI
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, macOS-13, windows-2022]
+        java: ['17', '21', '25']
+        distribution: ['temurin']
+        maven: ['3.9.10', '3.9.11', '3.10.0']
+        exclude:
+          # Java 25+ requires Maven 3.9.10+
+          - java: '25'
+            maven: '3.9.10'
+      fail-fast: false
+    name: ${{ matrix.os }} JDK ${{ matrix.java }}.${{ matrix.distribution }} Maven ${{ matrix.maven }}
+    steps:
+      - name: Git checkout
+        uses: actions/checkout@v4
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ matrix.distribution }}
+          java-version: ${{ matrix.java }}
+      - name: Set up Maven
+        uses: stCarolas/setup-maven@v4.6
+        with:
+          maven-version: ${{ matrix.maven }}
+      - name: Run Maven
+        run: mvn -PtestMinJdk=8 clean build install -Dmaven.compiler.release=17
+      - name: Upload Test Results and Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bitcoinj-core-test-results-jdk${{ matrix.java }}-${{ matrix.os }}-maven-${{ matrix.maven }}
+          path: |
+            bitcoinj-base/target/surefire-reports/
+            bitcoinj-base/target/test-results/
+            bitcoinj-core/target/surefire-reports/
+            bitcoinj-core/target/test-results/
+            bitcoinj-wallettool/target/surefire-reports/
+            bitcoinj-wallettool/target/test-results/
+            bitcoinj-integration-test/target/surefire-reports/
+            bitcoinj-integration-test/target/test-results/
+
