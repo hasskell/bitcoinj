@@ -61,21 +61,20 @@
         <native.maven.plugin.version>0.9.28</native.maven.plugin.version>
         <asciidoctor.maven.plugin.version>2.2.6</asciidoctor.maven.plugin.version>
     </properties>
-    
-    <!-- Since we doing this in several steps, we will not use modules for now and will add them later one by one -->
-    <!--
+
+    <!-- Order matters when we're building -->
     <modules>
-        <module>bitcoinj-base</module>
-        <module>bitcoinj-test-support</module>
-        <module>bitcoinj-core</module>
-        <module>bitcoinj-examples</module>
-        <module>bitcoinj-tools</module>
-        <module>bitcoinj-wallettool</module>
-        <module>bitcoinj-wallettemplate</module>
-        <module>bitcoinj-examples-kotlin</module>
-        <module>bitcoinj-integration-test</module>
+        <module>base</module>
+        <module>test-support</module>
+        <!-- <module>core</module>
+        <module>examples</module>
+        <module>tools</module>
+        <module>wallettool</module>
+        <module>wallettemplate</module>
+        <module>examples-kotlin</module>
+        <module>integration-test</module>
+        -->
     </modules>
-    -->
     
     <dependencyManagement>
         <dependencies>
@@ -151,6 +150,11 @@
                 <groupId>nl.jqno.equalsverifier</groupId>
                 <artifactId>equalsverifier</artifactId>
                 <version>${equalsverifier.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.hamcrest</groupId>
+                <artifactId>hamcrest-core</artifactId>
+                <version>${hamcrest.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.hamcrest</groupId>
@@ -322,6 +326,15 @@
                             </configuration>
                         </execution>
                     </executions>
+                </plugin>
+                
+                <plugin>
+                    <groupId>org.xolstice.maven.plugins</groupId>
+                    <artifactId>protobuf-maven-plugin</artifactId>
+                    <version>${protobuf.maven.plugin.version}</version>
+                    <configuration>
+                        <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
+                    </configuration>
                 </plugin>
             </plugins>
         </pluginManagement>
