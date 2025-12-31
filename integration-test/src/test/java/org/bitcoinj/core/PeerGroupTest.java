@@ -67,6 +67,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.bitcoinj.base.Coin.COIN;
 import static org.bitcoinj.base.Coin.valueOf;
@@ -167,39 +168,35 @@ public class PeerGroupTest extends TestWithPeerGroup {
 
     @Test
     public void peerDiscoveryPolling() throws InterruptedException {
-        // Check that if peer discovery fails, we keep trying until we have some nodes to talk with.
         final CountDownLatch latch = new CountDownLatch(1);
-        final AtomicBoolean result = new AtomicBoolean();
+        final AtomicBoolean firstFailed = new AtomicBoolean(false);
+
         peerGroup.addPeerDiscovery(new PeerDiscovery() {
             @Override
             public List<InetSocketAddress> getPeers(long services, Duration unused) throws PeerDiscoveryException {
-                if (!result.getAndSet(true)) {
-                    // Pretend we are not connected to the internet.
+                if (!firstFailed.getAndSet(true)) {
                     throw new PeerDiscoveryException("test failure");
                 } else {
-                    // Return a bogus address.
                     latch.countDown();
-                    return List.of(new InetSocketAddress("localhost", 1));
+                    return List.of(new InetSocketAddress(InetAddress.getLoopbackAddress(), 65535));
                 }
             }
-
-            @Override
-            public void shutdown() {
-            }
+            @Override public void shutdown() {}
         });
+
         peerGroup.start();
-        latch.await();
-        // Check that we did indeed throw an exception. If we got here it means we threw and then PeerGroup tried
-        // again a bit later.
-        assertTrue(result.get());
+        assertTrue("PeerGroup never retried discovery",
+                latch.await(10, TimeUnit.SECONDS));
+        assertTrue(firstFailed.get());
     }
+
 
     // Utility method to create a PeerDiscovery with a certain number of addresses.
     private PeerDiscovery createPeerDiscovery(int nrOfAddressesWanted, int port) {
         final List<InetSocketAddress> addresses = new ArrayList<>(nrOfAddressesWanted);
         for (int addressNr = 0; addressNr < nrOfAddressesWanted; addressNr++) {
             // make each address unique by using the counter to increment the port.
-            addresses.add(new InetSocketAddress("localhost", port + addressNr));
+            addresses.add(new InetSocketAddress(InetAddress.getLoopbackAddress(), port + addressNr));
         }
         return new PeerDiscovery() {
             public List<InetSocketAddress> getPeers(long services, Duration unused) throws PeerDiscoveryException {
@@ -211,16 +208,30 @@ public class PeerGroupTest extends TestWithPeerGroup {
     }
 
     @Test
-    public void multiplePeerDiscovery() {
+    public void multiplePeerDiscovery() throws Exception {
         peerGroup.setMaxPeersToDiscoverCount(98);
-        peerGroup.addPeerDiscovery(createPeerDiscovery(1, 0));
-        peerGroup.addPeerDiscovery(createPeerDiscovery(2, 100));
-        peerGroup.addPeerDiscovery(createPeerDiscovery(96, 200));
-        peerGroup.addPeerDiscovery(createPeerDiscovery(3, 300));
-        peerGroup.addPeerDiscovery(createPeerDiscovery(1, 400));
-        peerGroup.addDiscoveredEventListener(peerAddresses -> assertEquals(99, peerAddresses.size()));
+
+        peerGroup.addPeerDiscovery(createPeerDiscovery(1, 20000));
+        peerGroup.addPeerDiscovery(createPeerDiscovery(2, 20100));
+        peerGroup.addPeerDiscovery(createPeerDiscovery(96, 20200));
+        peerGroup.addPeerDiscovery(createPeerDiscovery(3, 20300));
+        peerGroup.addPeerDiscovery(createPeerDiscovery(1, 20400));
+
+        CountDownLatch discovered = new CountDownLatch(1);
+        AtomicReference<Set<PeerAddress>> discoveredPeers = new AtomicReference<>();
+
+        peerGroup.addDiscoveredEventListener(peerAddresses -> {
+            discoveredPeers.set(peerAddresses);
+            discovered.countDown();
+        });
+
         peerGroup.start();
+
+        assertTrue("Did not receive discovered peers",
+                discovered.await(10, TimeUnit.SECONDS));
+        assertEquals(99, discoveredPeers.get().size());
     }
+
 
     @Test
     public void receiveTxBroadcast() throws Exception {

@@ -56,11 +56,11 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.time.Duration;
-import java.util.Random;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.IntStream;
 
 import static org.bitcoinj.base.internal.Preconditions.checkArgument;
 import static org.bitcoinj.base.internal.Preconditions.checkState;
@@ -69,7 +69,6 @@ import static org.bitcoinj.base.internal.Preconditions.checkState;
  * Utility class that makes it easy to work with mock NetworkConnections.
  */
 public class TestWithNetworkConnections {
-    protected static final int TCP_PORT_BASE = 10000 + new Random().nextInt(40000);
     public static final int PEER_SERVERS = 5;
 
     protected static final NetworkParameters UNITTEST = UnitTestParams.get();
@@ -82,7 +81,10 @@ public class TestWithNetworkConnections {
 
     private final NioServer[] peerServers = new NioServer[PEER_SERVERS];
     private final ClientConnectionManager channels;
-    protected final BlockingQueue<InboundMessageQueuer> newPeerWriteTargetQueue = new LinkedBlockingQueue<>();
+    protected final BlockingQueue<InboundMessageQueuer>[] newPeerWriteTargetQueues =
+            IntStream.range(0, PEER_SERVERS)
+                    .mapToObj(i -> new LinkedBlockingQueue<InboundMessageQueuer>())
+                    .toArray(BlockingQueue[]::new);
 
     public enum ClientType {
         NIO_CLIENT_MANAGER,
@@ -125,7 +127,7 @@ public class TestWithNetworkConnections {
             channels.awaitRunning();
         }
 
-        socketAddress = new InetSocketAddress(InetAddress.getLoopbackAddress(), 1111);
+        socketAddress = new InetSocketAddress(InetAddress.getLoopbackAddress(), 0);
     }
 
     protected void startPeerServers() throws IOException {
@@ -136,6 +138,7 @@ public class TestWithNetworkConnections {
 
     protected void startPeerServer(int i) throws IOException {
         peerServers[i] = new NioServer(new StreamConnectionFactory() {
+            final int serverIndex = i;
             @Nullable
             @Override
             public StreamConnection getNewConnection(InetAddress inetAddress, int port) {
@@ -146,13 +149,17 @@ public class TestWithNetworkConnections {
 
                     @Override
                     public void connectionOpened() {
-                        newPeerWriteTargetQueue.offer(this);
+                        newPeerWriteTargetQueues[serverIndex].offer(this);
                     }
                 };
             }
-        }, new InetSocketAddress(InetAddress.getLoopbackAddress(), TCP_PORT_BASE + i));
+        }, new InetSocketAddress(InetAddress.getLoopbackAddress(), 0));
         peerServers[i].startAsync();
         peerServers[i].awaitRunning();
+    }
+
+    public InetSocketAddress getPeerServerAddress(int i) {
+        return peerServers[i].getBindAddress();
     }
 
     public void tearDown() throws Exception {
@@ -172,7 +179,7 @@ public class TestWithNetworkConnections {
         }
     }
 
-    protected InboundMessageQueuer connect(Peer peer, VersionMessage versionMessage) throws Exception {
+    protected InboundMessageQueuer connect(Peer peer, VersionMessage versionMessage, int serverIndex) throws Exception {
         checkArgument(versionMessage.services().has(Services.NODE_NETWORK));
         final AtomicBoolean doneConnecting = new AtomicBoolean(false);
         final Thread thisThread = Thread.currentThread();
@@ -182,16 +189,18 @@ public class TestWithNetworkConnections {
                     thisThread.interrupt();
             }
         });
-        if (clientType == ClientType.NIO_CLIENT_MANAGER || clientType == ClientType.BLOCKING_CLIENT_MANAGER)
-            channels.openConnection(new InetSocketAddress(InetAddress.getLoopbackAddress(), 2000), peer);
-        else if (clientType == ClientType.NIO_CLIENT)
-            new NioClient(new InetSocketAddress(InetAddress.getLoopbackAddress(), 2000), peer, Duration.ofMillis(100));
-        else if (clientType == ClientType.BLOCKING_CLIENT)
-            new BlockingClient(new InetSocketAddress(InetAddress.getLoopbackAddress(), 2000), peer, Duration.ofMillis(100), SocketFactory.getDefault(), null);
-        else
+        InetSocketAddress sockAddress = peerServers[serverIndex].getBindAddress();
+        if (clientType == ClientType.NIO_CLIENT_MANAGER || clientType == ClientType.BLOCKING_CLIENT_MANAGER) {
+            channels.openConnection(sockAddress, peer);
+        }
+        else if (clientType == ClientType.NIO_CLIENT) {
+            new NioClient(sockAddress, peer, Duration.ofMillis(100));
+        } else if (clientType == ClientType.BLOCKING_CLIENT) {
+            new BlockingClient(sockAddress, peer, Duration.ofMillis(100), SocketFactory.getDefault(), null);
+        } else
             throw new RuntimeException();
         // Claim we are connected to a different IP that what we really are, so tx confidence broadcastBy sets work
-        InboundMessageQueuer writeTarget = newPeerWriteTargetQueue.take();
+        InboundMessageQueuer writeTarget = newPeerWriteTargetQueues[serverIndex].take();
         writeTarget.peer = peer;
         // Complete handshake with the peer - send/receive version(ack)s, receive bloom filter
         checkState(!peer.getVersionHandshakeFuture().isDone());

@@ -45,6 +45,30 @@ javadoc.options.encoding = 'UTF-8'
 
 test {
     useJUnitPlatform()
-    exclude 'org/bitcoinj/core/PeerTest*'
-    exclude 'org/bitcoinj/core/TransactionBroadcastTest*'
+    // Unit test can run parallel but excluding networks test
+    maxParallelForks = Math.max(1, (Runtime.runtime.availableProcessors() / 2) as int)
+
+    exclude 'org/bitcoinj/core/**/PeerTest*'
+    exclude 'org/bitcoinj/core/**/PeerGroupTest*'
+    exclude 'org/bitcoinj/core/**/TransactionBroadcastTest*'
 }
+
+tasks.register('integrationTest', Test) {
+    useJUnitPlatform()
+    description = 'Runs network/PeerGroup integration tests'
+    group = 'verification'
+
+    include 'org/bitcoinj/core/**/PeerTest*'
+    include 'org/bitcoinj/core/**/PeerGroupTest*'
+    include 'org/bitcoinj/core/**/TransactionBroadcastTest*'
+    // Unlike unit test we want integration test run in sequence
+
+    maxParallelForks = 1
+    forkEvery = 1
+    shouldRunAfter tasks.test
+}
+
+tasks.named('check') {
+    dependsOn tasks.named('integrationTest')
+}
+

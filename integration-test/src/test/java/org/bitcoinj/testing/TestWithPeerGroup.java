@@ -88,15 +88,20 @@ public class TestWithPeerGroup extends TestWithNetworkConnections {
 
     @Override
     public void tearDown() {
+        blockJobs = false;
         try {
-            super.tearDown();
-            blockJobs = false;
-            if (peerGroup != null && peerGroup.isRunning())
-                peerGroup.stopAsync();
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+            if (peerGroup != null && peerGroup.isRunning()) {
+                peerGroup.stop();
+            }
+        } finally {
+            try {
+                super.tearDown();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
         }
     }
+
 
     protected void initPeerGroup() {
         if (clientType == ClientType.NIO_CLIENT_MANAGER)
@@ -133,9 +138,9 @@ public class TestWithPeerGroup extends TestWithNetworkConnections {
 
     protected InboundMessageQueuer connectPeerWithoutVersionExchange(int id) throws Exception {
         checkArgument(id < PEER_SERVERS);
-        InetSocketAddress remoteAddress = new InetSocketAddress(InetAddress.getLoopbackAddress(), TCP_PORT_BASE + id);
+        InetSocketAddress remoteAddress = getPeerServerAddress(id);
         Peer peer = peerGroup.connectTo(remoteAddress).getConnectionOpenFuture().get();
-        InboundMessageQueuer writeTarget = newPeerWriteTargetQueue.take();
+        InboundMessageQueuer writeTarget = newPeerWriteTargetQueues[id].take();
         writeTarget.peer = peer;
         return writeTarget;
     }
@@ -161,7 +166,7 @@ public class TestWithPeerGroup extends TestWithNetworkConnections {
 
     // handle peer discovered by PeerGroup
     protected InboundMessageQueuer handleConnectToPeer(int id, VersionMessage versionMessage) throws Exception {
-        InboundMessageQueuer writeTarget = newPeerWriteTargetQueue.take();
+        InboundMessageQueuer writeTarget = newPeerWriteTargetQueues[id].take();
         checkArgument(versionMessage.services().has(Services.NODE_NETWORK));
         // Complete handshake with the peer - send/receive version(ack)s, receive bloom filter
         writeTarget.sendMessage(versionMessage);

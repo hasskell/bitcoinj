@@ -134,4 +134,12 @@ public class NioServer extends AbstractExecutionThreadService {
         // Wake up the selector and let the selection thread break its loop as the ExecutionService !isRunning()
         selector.wakeup();
     }
+
+    /**
+     * Method that returns binded addresses
+     * @return Inet address
+     */
+    public InetSocketAddress getBindAddress() {
+        return (InetSocketAddress) sc.socket().getLocalSocketAddress();
+    }
 }
