@@ -69,7 +69,7 @@ import static org.bitcoinj.base.internal.Preconditions.checkState;
  * Utility class that makes it easy to work with mock NetworkConnections.
  */
 public class TestWithNetworkConnections {
-    protected static final int TCP_PORT_BASE = 10000 + new Random().nextInt(40000);
+    protected final int TCP_PORT_BASE = 10000 + new Random().nextInt(40000);
     public static final int PEER_SERVERS = 5;
 
     protected static final NetworkParameters UNITTEST = UnitTestParams.get();
@@ -125,7 +125,7 @@ public class TestWithNetworkConnections {
             channels.awaitRunning();
         }
 
-        socketAddress = new InetSocketAddress(InetAddress.getLoopbackAddress(), 1111);
+        socketAddress = new InetSocketAddress(InetAddress.getLoopbackAddress(), TCP_PORT_BASE + PEER_SERVERS);
     }
 
     protected void startPeerServers() throws IOException {
@@ -183,11 +183,11 @@ public class TestWithNetworkConnections {
             }
         });
         if (clientType == ClientType.NIO_CLIENT_MANAGER || clientType == ClientType.BLOCKING_CLIENT_MANAGER)
-            channels.openConnection(new InetSocketAddress(InetAddress.getLoopbackAddress(), 2000), peer);
+            channels.openConnection(new InetSocketAddress(InetAddress.getLoopbackAddress(), TCP_PORT_BASE + 0), peer);
         else if (clientType == ClientType.NIO_CLIENT)
-            new NioClient(new InetSocketAddress(InetAddress.getLoopbackAddress(), 2000), peer, Duration.ofMillis(100));
+            new NioClient(new InetSocketAddress(InetAddress.getLoopbackAddress(), TCP_PORT_BASE + 0), peer, Duration.ofMillis(100));
         else if (clientType == ClientType.BLOCKING_CLIENT)
-            new BlockingClient(new InetSocketAddress(InetAddress.getLoopbackAddress(), 2000), peer, Duration.ofMillis(100), SocketFactory.getDefault(), null);
+            new BlockingClient(new InetSocketAddress(InetAddress.getLoopbackAddress(), TCP_PORT_BASE + 0), peer, Duration.ofMillis(100), SocketFactory.getDefault(), null);
         else
             throw new RuntimeException();
         // Claim we are connected to a different IP that what we really are, so tx confidence broadcastBy sets work

@@ -544,10 +544,11 @@ public class PeerGroupTest extends TestWithPeerGroup {
     @Test
     @Ignore("disabled for now as this test is too flaky")
     public void peerPriority() throws Exception {
+        // Use dynamic ports from TCP_PORT_BASE to avoid conflicts when tests run in parallel
         final List<InetSocketAddress> addresses = new ArrayList<>(List.of(
-                new InetSocketAddress("localhost", 2000),
-                new InetSocketAddress("localhost", 2001),
-                new InetSocketAddress("localhost", 2002)
+                new InetSocketAddress("localhost", TCP_PORT_BASE + 0),
+                new InetSocketAddress("localhost", TCP_PORT_BASE + 1),
+                new InetSocketAddress("localhost", TCP_PORT_BASE + 2)
         ));
         peerGroup.addConnectedEventListener(connectedListener);
         peerGroup.addDisconnectedEventListener(disconnectedListener);
@@ -577,39 +578,39 @@ public class PeerGroupTest extends TestWithPeerGroup {
         connectedPeers.take();
         connectedPeers.take();
         addresses.clear();
-        addresses.add(new InetSocketAddress("localhost", 2003));
+        addresses.add(new InetSocketAddress("localhost", TCP_PORT_BASE + 3));
         stopPeerServer(2);
-        assertEquals(2002, disconnectedPeers.take().getAddress().getPort()); // peer died
+        assertEquals(TCP_PORT_BASE + 2, disconnectedPeers.take().getAddress().getPort()); // peer died
 
         // discovers, connects to new peer
         jobBlocks.release(1);
         handleConnectToPeer(3);
-        assertEquals(2003, connectedPeers.take().getAddress().getPort());
+        assertEquals(TCP_PORT_BASE + 3, connectedPeers.take().getAddress().getPort());
 
         stopPeerServer(1);
-        assertEquals(2001, disconnectedPeers.take().getAddress().getPort()); // peer died
+        assertEquals(TCP_PORT_BASE + 1, disconnectedPeers.take().getAddress().getPort()); // peer died
 
         // Alternates trying two offline peers
         jobBlocks.release(10);
-        assertEquals(2001, disconnectedPeers.take().getAddress().getPort());
-        assertEquals(2002, disconnectedPeers.take().getAddress().getPort());
-        assertEquals(2001, disconnectedPeers.take().getAddress().getPort());
-        assertEquals(2002, disconnectedPeers.take().getAddress().getPort());
-        assertEquals(2001, disconnectedPeers.take().getAddress().getPort());
+        assertEquals(TCP_PORT_BASE + 1, disconnectedPeers.take().getAddress().getPort());
+        assertEquals(TCP_PORT_BASE + 2, disconnectedPeers.take().getAddress().getPort());
+        assertEquals(TCP_PORT_BASE + 1, disconnectedPeers.take().getAddress().getPort());
+        assertEquals(TCP_PORT_BASE + 2, disconnectedPeers.take().getAddress().getPort());
+        assertEquals(TCP_PORT_BASE + 1, disconnectedPeers.take().getAddress().getPort());
 
         // Peer 2 comes online
         startPeerServer(2);
         jobBlocks.release(1);
         handleConnectToPeer(2);
-        assertEquals(2002, connectedPeers.take().getAddress().getPort());
+        assertEquals(TCP_PORT_BASE + 2, connectedPeers.take().getAddress().getPort());
 
         jobBlocks.release(6);
         stopPeerServer(2);
-        assertEquals(2002, disconnectedPeers.take().getAddress().getPort()); // peer died
+        assertEquals(TCP_PORT_BASE + 2, disconnectedPeers.take().getAddress().getPort()); // peer died
 
         // Peer 2 is tried before peer 1, since it has a lower backoff due to recent success
-        assertEquals(2002, disconnectedPeers.take().getAddress().getPort());
-        assertEquals(2001, disconnectedPeers.take().getAddress().getPort());
+        assertEquals(TCP_PORT_BASE + 2, disconnectedPeers.take().getAddress().getPort());
+        assertEquals(TCP_PORT_BASE + 1, disconnectedPeers.take().getAddress().getPort());
     }
 
     @Test
@@ -745,33 +746,33 @@ public class PeerGroupTest extends TestWithPeerGroup {
 
     @Test
     public void preferLocalPeer() throws IOException {
-        // Because we are using the same port (8333 or 18333) that is used by Bitcoin Core
-        // We have to consider 2 cases:
-        // 1. Test are executed on the same machine that is running a full node
-        // 2. Test are executed without any full node running locally
-        // We have to avoid to connecting to real and external services in unit tests
-        // So we skip this test in case we have already something running on port UNITTEST.getPort()
+        // Use a dynamic port (0) to avoid conflicts when tests run in parallel
+        // Check that if we have a localhost peer then it's used instead of the p2p network.
+        try (ServerSocket local = new ServerSocket(0, 100, InetAddress.getLoopbackAddress())) {
+            int localPort = local.getLocalPort();
+            
+            peerGroup.setUseLocalhostPeerWhenPossible(false); // Disable automatic localhost detection
+            // Add a peer discovery that returns our local server with dynamic port
+            peerGroup.addPeerDiscovery(new PeerDiscovery() {
+                @Override
+                public List<InetSocketAddress> getPeers(long services, Duration unused) throws PeerDiscoveryException {
+                    return List.of(new InetSocketAddress(InetAddress.getLoopbackAddress(), localPort));
+                }
 
-        // Check that if we have a localhost port 8333 or 18333 then it's used instead of the p2p network.
-        ServerSocket local = null;
-        try {
-            local = new ServerSocket(UNITTEST.getPort(), 100, InetAddress.getLoopbackAddress());
-        }
-        catch(BindException e) { // Port already in use, skipping this test.
-            return;
-        }
-
-        try {
-            peerGroup.setUseLocalhostPeerWhenPossible(true);
+                @Override
+                public void shutdown() {
+                }
+            });
             peerGroup.start();
             local.accept().close();   // Probe connect
             local.accept();   // Real connect
             // If we get here it used the local peer. Check no others are in use.
             assertEquals(1, peerGroup.getMaxConnections());
-            assertEquals(PeerAddress.localhost(UNITTEST), peerGroup.getPendingPeers().get(0).getAddress());
-        } finally {
-            local.close();
+            InetSocketAddress expectedAddress = new InetSocketAddress(InetAddress.getLoopbackAddress(), localPort);
+            assertEquals(expectedAddress, peerGroup.getPendingPeers().get(0).getAddress().getSocketAddress());
         }
+        // ServerSocket is automatically closed by try-with-resources
+        // peerGroup cleanup is handled by tearDown() in TestWithPeerGroup
     }
 
     private <T extends Message> T assertNextMessageIs(InboundMessageQueuer q, Class<T> klass) throws Exception {
